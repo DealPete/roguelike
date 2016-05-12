@@ -10,6 +10,8 @@ function _possibleConstructorReturn(self, call) { if (!self) { throw new Referen
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
 
+var dirs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
 var mov = { "33": [-1, 1],
 	"34": [1, 1],
 	"35": [1, -1],
@@ -53,31 +55,59 @@ var Tiles = {
 	"spider": "-800px -384px"
 };
 
-var xpTable = [0, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+var xpTable = [0, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
 
-var startingStats = {
-	hero: {
-		type: "hero",
-		maxhp: 20,
-		hp: 20,
-		str: 5,
-		dex: 5,
-		armor: 0,
-		xp: 0,
-		lvl: 1 },
-	skeleton: {
-		type: "skeleton",
-		hd: 1,
-		str: 2,
-		dex: 4,
-		armor: 1,
-		xp: 5
-	}
-};
+var startingStats = [{
+	type: "hero",
+	maxhp: 20,
+	hp: 20,
+	str: 5,
+	dex: 5,
+	armor: 0,
+	xp: 0,
+	xpLevel: 1,
+	dungeonLevel: 1,
+	weapon: "hands"
+}, {
+	type: "skeleton",
+	hd: 1,
+	str: 2,
+	dex: 4,
+	armor: 1,
+	xp: 5
+}, {
+	type: "orc",
+	hd: 1,
+	str: 4,
+	dex: 2,
+	armor: 2,
+	xp: 10
+}, {
+	type: "snake",
+	hd: 2,
+	str: 2,
+	dex: 6,
+	armor: 0,
+	xp: 15
+}, {
+	type: "bat",
+	hd: 1,
+	str: 1,
+	dex: 8,
+	armor: 0,
+	xp: 5
+}, {
+	type: "spider",
+	hd: 2,
+	str: 3,
+	dex: 5,
+	armor: 0,
+	xp: 15
+}];
 
 var DungeonWidth = 30;
 var DungeonHeight = 30;
-var DungeonDepth = 2;
+var DungeonDepth = 5;
 var MonsterDensity = 10;
 var SightRadius = 8;
 var MessageQueueSize = 6;
@@ -189,7 +219,7 @@ function createDungeon(level, hero) {
 	if (level == DungeonDepth) dungeon[y][x] = "orb";else dungeon[y][x] = "ladder_down";
 
 	var start_spot = free_room_tile(hero_start);
-	if (hero) actors.push(Object.assign({}, hero, start_spot));else actors.push(Object.assign({}, start_spot, startingStats["hero"]));
+	if (hero) actors.push(Object.assign({}, hero, start_spot));else actors.push(Object.assign({}, start_spot, startingStats[0]));
 
 	function getFreeTile() {
 		var tile;
@@ -201,7 +231,7 @@ function createDungeon(level, hero) {
 	}
 
 	for (var _i9 = 0; _i9 < MonsterDensity; _i9++) {
-		var newMonster = Object.assign(getFreeTile(), startingStats["skeleton"]);
+		var newMonster = Object.assign({}, getFreeTile(), startingStats[randomInt(1, startingStats.length - 1)]);
 		var hp = 0;
 		for (var _i10 = 0; _i10 < newMonster.hd; _i10++) {
 			hp += randomInt(1, 8);
@@ -220,6 +250,11 @@ function createDungeon(level, hero) {
 		dungeon[_tile.y][_tile.x] = "scroll";
 	}
 
+	if (randomInt(0, 1)) {
+		var _tile2 = getFreeTile();
+		if (!hero || hero.weapon == "hands") dungeon[_tile2.y][_tile2.x] = "club";else dungeon[_tile2.y][_tile2.x] = "sword";
+	}
+
 	return [dungeon, actors];
 }
 
@@ -232,8 +267,8 @@ function controller() {
 			return "working";
 		case "READY_FOR_INPUT":
 			return "ready";
-		case "HERO_DIES":
-			return "hero_dead";
+		case "GAME_OVER":
+			return "game_over";
 		default:
 			return state;
 	}
@@ -281,6 +316,9 @@ function dungeon() {
 		case 'CREATE_DUNGEON':
 			return action.dungeon;
 
+		case 'REMOVE_FEATURE':
+			return state.slice(0, action.y).concat([state[action.y].slice(0, action.x).concat(["floor"]).concat(state[action.y].slice(action.x + 1))]).concat(state.slice(action.y + 1));
+
 		default:
 			return state;
 	}
@@ -291,7 +329,6 @@ function actors() {
 	var action = arguments[1];
 
 	switch (action.type) {
-		// POPULATE_DUNGEON: monsters
 		case 'POPULATE_DUNGEON':
 			return action.actors;
 		// MOVE_ACTOR: index, newYX
@@ -300,8 +337,14 @@ function actors() {
 		// MUTATE_ACTOR: index, newValues
 		case 'MUTATE_ACTOR':
 			return state.slice(0, action.index).concat([Object.assign({}, state[action.index], action.newValues)]).concat(state.slice(action.index + 1));
-		case 'REMOVE_ACTOR':
-			return state.slice(0, action.index).concat(state.slice(action.index + 1));
+		// CREATE_ACTOR: values
+		case 'CREATE_ACTOR':
+			return state.concat([action.values]);
+		// REMOVE_ACTOR: indices
+		case 'REMOVE_ACTORS':
+			return state.filter(function (actor, i) {
+				return action.indices.indexOf(i) == -1;
+			});
 		default:
 			return state;
 	}
@@ -357,7 +400,12 @@ var PlayerStats = function (_React$Component2) {
 					"p",
 					null,
 					"Level ",
-					hero.lvl
+					hero.xpLevel,
+					React.createElement("br", null),
+					"EXP ",
+					hero.xp,
+					"/",
+					xpTable[hero.xpLevel]
 				),
 				React.createElement(
 					"p",
@@ -370,14 +418,6 @@ var PlayerStats = function (_React$Component2) {
 				React.createElement(
 					"p",
 					null,
-					"EXP ",
-					hero.xp,
-					"/",
-					xpTable[hero.lvl]
-				),
-				React.createElement(
-					"p",
-					null,
 					"Strength ",
 					hero.str
 				),
@@ -386,6 +426,12 @@ var PlayerStats = function (_React$Component2) {
 					null,
 					"Dexterity ",
 					hero.dex
+				),
+				React.createElement(
+					"p",
+					null,
+					"Weapon: ",
+					hero.weapon
 				)
 			);
 		}
@@ -440,6 +486,7 @@ var Container = function (_React$Component4) {
 	_createClass(Container, [{
 		key: "render",
 		value: function render() {
+			var _this5 = this;
 
 			if (this.props.state.controller != "init") {
 				var _actors = this.props.state.actors;
@@ -454,7 +501,7 @@ var Container = function (_React$Component4) {
 
 					var _loop2 = function _loop2(i) {
 						var key = j * (2 * SightRadius + 1) + i;
-						if (inLOS({ y: hero.y, x: hero.x }, { y: j, x: i }, _dungeon)) {
+						if (inLOS({ y: hero.y, x: hero.x }, { y: j, x: i }, _this5.props.state)) {
 							var actor = _actors.find(function (actor) {
 								return actor.y == j && actor.x == i;
 							});
@@ -482,8 +529,8 @@ var Container = function (_React$Component4) {
 					React.createElement(
 						"h1",
 						null,
-						"Dungeon level ",
-						hero.lvl
+						"Dungeon Level ",
+						hero.dungeonLevel
 					),
 					React.createElement(
 						"div",
@@ -510,6 +557,143 @@ var render = function render() {
 store.subscribe(render);
 'use strict';
 
+function quaffPotion(state) {
+	var hero = state.actors[0];
+
+	var potionType = randomInt(1, 8);
+
+	if (potionType == 1) {
+		var damage = randomInt(1, 10) + randomInt(1, 10);
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'Argh! The potion was poisoned. You lose ' + damage + ' HP.'
+		});
+		injure(hero, damage, state);
+	} else if (potionType == 2) {
+		var increase = randomInt(xpTable[hero.xpLevel - 1] + 1, xpTable[hero.xpLevel]);
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'It was potion of experience! You gain ' + increase + ' XP.'
+		});
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: 0,
+			newValues: { xp: hero.xp + increase }
+		});
+
+		if (state.actors[0].xp + increase >= xpTable[state.actors[0].xpLevel]) gainLevel(state);
+	} else if (potionType == 3) {
+		heal(hero, hero.maxhp - hero.hp, state);
+		store.dispatch({
+			type: 'MESSAGE',
+			text: "It was a potion of panacea! You are fully healed."
+		});
+	} else {
+		var healing = randomInt(1, 10) + randomInt(1, 10);
+		healing = heal(hero, healing, state);
+		if (hero.hp == hero.maxhp) {
+			store.dispatch({
+				type: 'MESSAGE',
+				text: "It was a potion of healing. You are completely healed."
+			});
+		} else {
+			store.dispatch({
+				type: 'MESSAGE',
+				text: 'It was a potion of healing. You regain ' + healing + ' HP.'
+			});
+		}
+	}
+}
+
+function readScroll(state) {
+	var hero = state.actors[0];
+
+	var scrollType = randomInt(1, 8);
+
+	if (scrollType == 1) {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'The walls come crashing down!'
+		});
+		for (var j = 1; j < DungeonHeight - 1; j++) {
+			for (var i = 1; i < DungeonWidth - 1; i++) {
+				if (state.dungeon[j][i] == "wall") store.dispatch({
+					type: 'REMOVE_FEATURE',
+					y: j,
+					x: i
+				});
+			}
+		}
+	} else if (scrollType == 2) {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'It was a scroll of summoning!'
+		});
+		var summonCount = 0;
+		for (var _j = hero.y - 1; _j <= hero.y + 1; _j++) {
+			for (var _i = hero.x - 1; _i <= hero.x + 1; _i++) {
+				if ((_j != hero.y || _i != hero.x) && passable(_j, _i, state)) if (randomInt(0, 1)) {
+					summonCount++;
+					store.dispatch({
+						type: 'CREATE_ACTOR',
+						values: Object.assign({}, { y: _j, x: _i }, startingStats[randomInt(1, startingStats.length - 1)])
+					});
+				}
+			}
+		}if (summonCount == 0) store.dispatch({
+			type: 'MESSAGE',
+			text: 'Fortunately, no enemies appear.'
+		});
+	} else if (scrollType == 3) {
+		(function () {
+			store.dispatch({
+				type: 'MESSAGE',
+				text: 'Your enemies explode!'
+			});
+
+			var removeActors = [];
+
+			state.actors.forEach(function (actor, i) {
+				if (i != 0 && inLOS(hero, actor, state)) removeActors.push(i);
+			});
+
+			store.dispatch({
+				type: 'REMOVE_ACTORS',
+				indices: removeActors
+			});
+		})();
+	} else if (scrollType == 4) {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'It is a scroll of training. Your abilities improve.'
+		});
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: 0,
+			newValues: {
+				str: hero.str + 1,
+				dex: hero.dex + 1
+			}
+		});
+	} else {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'Your position suddenly seems uncertain...'
+		});
+		var y, x;
+		do {
+			y = randomInt(1, DungeonHeight - 2);
+			x = randomInt(1, DungeonWidth - 2);
+		} while (!passable(y, x, state));
+		store.dispatch({
+			type: 'MOVE_ACTOR',
+			index: 0,
+			newYX: { y: y, x: x }
+		});
+	}
+}
+'use strict';
+
 var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
 function startGame() {
@@ -526,16 +710,89 @@ function startGame() {
 	store.dispatch({ type: 'READY_FOR_INPUT' });
 }
 
-function inLOS(actor, pos, dungeon) {
+function inLOS(actor, pos, state) {
 	if (pos.y < 0 || pos.y >= DungeonHeight || pos.x < 0 || pos.x >= DungeonWidth) return false;
 
 	for (var y = pos.y, x = pos.x; y != actor.y || x != actor.x;) {
 		if (y < actor.y) y++;if (y > actor.y) y--;
 		if (x < actor.x) x++;if (x > actor.x) x--;
-		if (dungeon[y][x] == "wall") return false;
+		if (state.dungeon[y][x] == "wall") return false;
 	}
 
 	return true;
+}
+
+function gainLevel(state) {
+	var hero = state.actors[0];
+
+	store.dispatch({
+		type: 'MESSAGE',
+		text: 'You advance to level ' + (hero.xpLevel + 1) + '!'
+	});
+
+	var newStr = hero.str + randomInt(0, 1);
+	var newDex = hero.dex + randomInt(0, 1);
+	var hpGain = randomInt(10, 20);
+	store.dispatch({
+		type: 'MUTATE_ACTOR',
+		index: 0,
+		newValues: {
+			str: newStr,
+			dex: newDex,
+			maxhp: hero.maxhp + hpGain,
+			hp: hero.hp + hpGain,
+			xpLevel: hero.xpLevel + 1
+		}
+	});
+}
+
+function heal(actor, healing, state) {
+	if (actor.hp + healing > actor.maxhp) {
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: state.actors.indexOf(actor),
+			newValues: { hp: actor.maxhp }
+		});
+		return actor.maxhp - actor.hp;
+	} else {
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: state.actors.indexOf(actor),
+			newValues: { hp: actor.hp + healing }
+		});
+		return healing;
+	}
+}
+
+function injure(actor, damage, state) {
+	if (actor.hp - damage > 0) {
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: state.actors.indexOf(actor),
+			newValues: { hp: actor.hp - damage }
+		});
+	} else if (actor.type == "hero") {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: "You die! Press <SPACE> to restart."
+		});
+		store.dispatch({ type: 'GAME_OVER' });
+	} else {
+		store.dispatch({
+			type: 'MESSAGE',
+			text: 'The ' + actor.type + ' is defeated!'
+		});
+		store.dispatch({
+			type: 'REMOVE_ACTORS',
+			indices: [state.actors.indexOf(actor)]
+		});
+		store.dispatch({
+			type: 'MUTATE_ACTOR',
+			index: 0,
+			newValues: { xp: state.actors[0].xp + actor.xp }
+		});
+		if (state.actors[0].xp + actor.xp >= xpTable[state.actors[0].xpLevel]) gainLevel(state);
+	}
 }
 
 function attack(source, target, state) {
@@ -556,38 +813,13 @@ function attack(source, target, state) {
 				type: 'MESSAGE',
 				text: actorName + ' strike' + suffix + ' ' + targetName + ' for ' + damage + ' damage.'
 			});
-			if (target.hp - damage > 0) {
-				store.dispatch({
-					type: 'MUTATE_ACTOR',
-					index: state.actors.indexOf(target),
-					newValues: { hp: target.hp - damage }
-				});
-			} else if (target.type == "hero") {
-				store.dispatch({
-					type: 'MESSAGE',
-					text: "You die! Press <SPACE> to restart."
-				});
-				store.dispatch({ type: 'HERO_DIES' });
-			} else {
-				store.dispatch({
-					type: 'MESSAGE',
-					text: 'The ' + target.type + ' is defeated!'
-				});
-				store.dispatch({
-					type: 'MUTATE_ACTOR',
-					index: 0,
-					newValues: { xp: state.actors[0].xp + target.xp }
-				});
-				store.dispatch({
-					type: 'REMOVE_ACTOR',
-					index: state.actors.indexOf(target)
-				});
-			}
+			injure(target, damage, state);
 		}
 	} else {
+		var suffix2 = source.type == "hero" ? "" : "es";
 		store.dispatch({
 			type: 'MESSAGE',
-			text: actorName + ' swing' + suffix + ' at ' + targetName + ' and miss.'
+			text: actorName + ' swing' + suffix + ' at ' + targetName + ' and miss' + suffix2 + '.'
 		});
 	}
 }
@@ -606,7 +838,7 @@ function moveToward(actor, target, state) {
 	if (target.x > newX) newX++;
 	if (target.x < newX) newX--;
 
-	if (newY == target.y && newX == target.x) {
+	if (newY == target.y && newX == target.x && target.type) {
 		attack(actor, target, state);
 	} else if (passable(newY, newX, state)) return { y: newY, x: newX };else {
 		newY = actor.y;newX = actor.x;
@@ -628,12 +860,24 @@ function moveMonsters() {
 
 	state.actors.forEach(function (actor, i) {
 		if (i != 0 && state.controller == "working") {
-			var newYX = moveToward(actor, state.actors[0], state);
-			if (newYX) store.dispatch({
-				type: 'MOVE_ACTOR',
-				index: i,
-				newYX: newYX
-			});
+			if (!actor.seenHero) {
+				if (inLOS(state.actors[0], actor, state)) actor.seenHero = true;
+			}
+
+			if (actor.seenHero) {
+				var newYX;
+				if (actor.type == "bat") {
+					var randomDir = dirs[randomInt(0, 7)];
+					var randomSpot = { y: actor.y + randomDir[0], x: actor.x + randomDir[1] };
+					if (passable(randomSpot.y, randomSpot.x, state)) newYX = moveToward(actor, randomSpot, state);else newYX = moveToward(actor, state.actors[0], state);
+				} else newYX = moveToward(actor, state.actors[0], state);
+
+				if (newYX) store.dispatch({
+					type: 'MOVE_ACTOR',
+					index: i,
+					newYX: newYX
+				});
+			}
 		}
 		state = store.getState();
 	});
@@ -641,14 +885,17 @@ function moveMonsters() {
 
 window.addEventListener("keydown", function (e) {
 	var state = store.getState();
-	var dungeon = state.dungeon;
-	var actors = state.actors;
-
-	var hero = actors[0];
 
 	if (state.controller == "ready") {
+		var dungeon = state.dungeon;
+		var actors = state.actors;
+
+		var hero = actors[0];
+
 		store.dispatch({ type: 'BEGIN_TURN' });
 		if (mov[e.keyCode]) {
+			var weapon;
+
 			(function () {
 				var newY = hero.y + mov[e.keyCode][0];
 				var newX = hero.x + mov[e.keyCode][1];
@@ -658,30 +905,135 @@ window.addEventListener("keydown", function (e) {
 				if (actor) {
 					attack(hero, actor, state);
 				} else {
+					var move = true;
+
 					switch (dungeon[newY][newX]) {
 						case "wall":
+							move = false;
+							break;
+
+						case "club":
+							store.dispatch({ type: 'MESSAGE',
+								text: "You find a stout club. It should be good for whacking monsters."
+							});
+							store.dispatch({ type: 'MUTATE_ACTOR',
+								index: 0,
+								newValues: { weapon: "club", str: hero.str + 2 }
+							});
+							store.dispatch({ type: 'REMOVE_FEATURE',
+								y: newY,
+								x: newX
+							});
+							break;
+
+						case "sword":
+							if (hero.weapon == "club") {
+								store.dispatch({ type: 'MESSAGE',
+									text: "You find a sword! Time to chop stuff up."
+								});
+								store.dispatch({ type: 'MUTATE_ACTOR',
+									index: 0,
+									newValues: { weapon: "sword", str: hero.str + 2 }
+								});
+							} else {
+								var bonus = hero.weapon[hero.weapon.length - 1];
+								weapon = "sword";
+
+
+								bonus = parseInt(bonus);
+								if (!isNaN(bonus)) weapon = "sword + " + (bonus + 1);
+
+								store.dispatch({ type: 'MESSAGE',
+									text: "You find a better sword."
+								});
+								store.dispatch({ type: 'MUTATE_ACTOR',
+									index: 0,
+									newValues: { weapon: weapon, str: hero.str + 1 }
+								});
+							}
+							store.dispatch({ type: 'REMOVE_FEATURE',
+								y: newY,
+								x: newX
+							});
 							break;
 
 						case "orb":
 							store.dispatch({ type: 'MESSAGE',
 								text: "Congratulations! You have discovered to orb of Zot! You win!"
 							});
+							store.dispatch({ type: 'GAME_OVER' });
+							break;
+
+						case "ladder_down":
+							store.dispatch({ type: 'MESSAGE',
+								text: "There is a ladder here. Press > to descend."
+							});
+							break;
+
+						case "potion":
+							store.dispatch({ type: 'MESSAGE',
+								text: "There is a potion here. Press Q to quaff it."
+							});
+							break;
+
+						case "scroll":
+							store.dispatch({ type: 'MESSAGE',
+								text: "There is a scroll here. Press R to read it."
+							});
+							break;
 
 						default:
-							store.dispatch({
-								type: 'MOVE_ACTOR',
-								index: 0,
-								newYX: {
-									y: newY,
-									x: newX
-								}
-							});
+					}
+
+					if (move) {
+						store.dispatch({
+							type: 'MOVE_ACTOR',
+							index: 0,
+							newYX: {
+								y: newY,
+								x: newX
+							}
+						});
 					}
 				}
 
 				moveMonsters();
 			})();
 		} else switch (e.keyCode) {
+			case 81:
+				if (dungeon[hero.y][hero.x] == "potion") {
+					store.dispatch({ type: 'MESSAGE',
+						text: 'You throw back the potion.'
+					});
+					store.dispatch({ type: 'REMOVE_FEATURE',
+						y: hero.y,
+						x: hero.x
+					});
+					quaffPotion(state);
+				} else {
+					store.dispatch({ type: 'MESSAGE',
+						text: 'There is nothing quaffable here.'
+					});
+				}
+				break;
+
+			case 82:
+				if (dungeon[hero.y][hero.x] == "scroll") {
+					store.dispatch({ type: 'MESSAGE',
+						text: 'You read the scroll.'
+					});
+					store.dispatch({ type: 'REMOVE_FEATURE',
+						y: hero.y,
+						x: hero.x
+					});
+					readScroll(state);
+				} else {
+					store.dispatch({ type: 'MESSAGE',
+						text: 'There is nothing to read here.'
+					});
+				}
+				break;
+
 			case 32:
 			case 101:
 				moveMonsters();
@@ -689,7 +1041,7 @@ window.addEventListener("keydown", function (e) {
 
 			case 190:
 				if (e.shiftKey) if (dungeon[hero.y][hero.x] == "ladder_down") {
-					var _createDungeon3 = createDungeon(hero.lvl + 1, hero);
+					var _createDungeon3 = createDungeon(hero.dungeonLevel + 1, hero);
 
 					var _createDungeon4 = _slicedToArray(_createDungeon3, 2);
 
@@ -697,13 +1049,13 @@ window.addEventListener("keydown", function (e) {
 					var _actors = _createDungeon4[1];
 
 					store.dispatch({ type: 'CREATE_DUNGEON', dungeon: newDungeon });
-					store.dispatch({ type: "MUTATE_ACTOR", index: 0, newValues: { lvl: hero.lvl + 1 } });
 					store.dispatch({ type: 'POPULATE_DUNGEON', actors: _actors });
-					store.dispatch({ type: "MESSAGE", text: "You climb down the ladder to level " + (hero.lvl + 1) });
+					store.dispatch({ type: 'MUTATE_ACTOR', index: 0, newValues: { dungeonLevel: hero.dungeonLevel + 1 } });
+					store.dispatch({ type: "MESSAGE", text: "You climb down the ladder to level " + (hero.dungeonLevel + 1) + "." });
 				} else store.dispatch({ type: "MESSAGE", text: "You can't go down here." });
 				break;
 		}
-	} else if (e.keyCode == 32 && state.controller == "hero_dead") {
+	} else if (e.keyCode == 32 && state.controller == "game_over") {
 		startGame();
 	}
 	if (store.getState().controller == "working") store.dispatch({ type: 'READY_FOR_INPUT' });

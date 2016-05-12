@@ -1,3 +1,5 @@
+const dirs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
 const mov = {"33": [-1, 1],
 	"34": [1, 1],
 	"35": [1, -1],
@@ -49,10 +51,10 @@ const Tiles = {
 	"spider": "-800px -384px"
 };
 
-const xpTable = [0, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+const xpTable = [0, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
 
-const startingStats = {
-	hero: {
+const startingStats = [
+	{
 		type: "hero",
 		maxhp: 20,
 		hp: 20,
@@ -60,20 +62,55 @@ const startingStats = {
 		dex: 5,
 		armor: 0,
 		xp: 0,
-		lvl:1},
-	skeleton: {
+		xpLevel: 1,
+		dungeonLevel: 1,
+		weapon: "hands"
+	},
+	{
 		type: "skeleton",
 		hd: 1,
 		str: 2,
 		dex: 4,
 		armor: 1,
 		xp: 5
+	},
+	{
+		type: "orc",
+		hd: 1,
+		str: 4,
+		dex: 2,
+		armor: 2,
+		xp: 10
+	},
+	{
+		type: "snake",
+		hd: 2,
+		str: 2,
+		dex: 6,
+		armor: 0,
+		xp: 15
+	},
+	{
+		type: "bat",
+		hd: 1,
+		str: 1,
+		dex: 8,
+		armor: 0,
+		xp: 5
+	},
+	{
+		type: "spider",
+		hd: 2,
+		str: 3,
+		dex: 5,
+		armor: 0,
+		xp: 15
 	}
-};
+];
 
 const DungeonWidth = 30;
 const DungeonHeight = 30;
-const DungeonDepth = 2;
+const DungeonDepth = 5;
 const MonsterDensity = 10;
 const SightRadius = 8;
 const MessageQueueSize = 6;
@@ -198,7 +235,7 @@ function createDungeon(level, hero) {
 	if (hero)
 		actors.push(Object.assign({}, hero, start_spot));
 	else
-		actors.push(Object.assign({}, start_spot, startingStats["hero"]));
+		actors.push(Object.assign({}, start_spot, startingStats[0]));
 
 	function getFreeTile() {
 		var tile;
@@ -212,7 +249,7 @@ function createDungeon(level, hero) {
 	}
 
 	for(let i=0; i < MonsterDensity; i++) {
-		let newMonster = Object.assign(getFreeTile(), startingStats["skeleton"]);
+		let newMonster = Object.assign({}, getFreeTile(), startingStats[randomInt(1, startingStats.length - 1)]);
 		let hp = 0;
 		for(let i=0; i < newMonster.hd; i++)
 			hp += randomInt(1, 8);
@@ -231,6 +268,14 @@ function createDungeon(level, hero) {
 		dungeon[tile.y][tile.x] = "scroll";
 	}
 
+	if (randomInt(0,1)) {
+		let tile = getFreeTile();
+		if (!hero || hero.weapon == "hands")
+			dungeon[tile.y][tile.x] = "club";
+		else
+			dungeon[tile.y][tile.x] = "sword";
+	}
+		
 	return [dungeon, actors];
 }
 
@@ -240,8 +285,8 @@ function controller(state = "init", action) {
 		return "working";
 	case "READY_FOR_INPUT":
 		return "ready";
-	case "HERO_DIES":
-		return "hero_dead";
+	case "GAME_OVER":
+		return "game_over";
 	default:
 		return state;
 	}
@@ -276,6 +321,13 @@ function dungeon(state = [], action) {
 	switch (action.type) {
 		case 'CREATE_DUNGEON':
 			return action.dungeon;
+		
+		case 'REMOVE_FEATURE':
+			return state.slice(0, action.y)
+				.concat([state[action.y].slice(0, action.x)
+					.concat(["floor"])
+					.concat(state[action.y].slice(action.x + 1))])
+				.concat(state.slice(action.y + 1));
 
 		default:
 			return state;
@@ -284,7 +336,6 @@ function dungeon(state = [], action) {
 
 function actors(state = [], action) {
 	switch (action.type) {
-		// POPULATE_DUNGEON: monsters
 		case 'POPULATE_DUNGEON':
 			return action.actors;
 		// MOVE_ACTOR: index, newYX
@@ -296,8 +347,12 @@ function actors(state = [], action) {
 			return state.slice(0, action.index)
 			.concat([Object.assign({}, state[action.index], action.newValues)])
 			.concat(state.slice(action.index + 1));
-		case 'REMOVE_ACTOR':
-			return state.slice(0, action.index).concat(state.slice(action.index + 1));
+		// CREATE_ACTOR: values
+		case 'CREATE_ACTOR':
+			return state.concat([action.values]);
+		// REMOVE_ACTOR: indices
+		case 'REMOVE_ACTORS':
+			return state.filter( (actor, i) => action.indices.indexOf(i) == -1 );
 		default:
 			return state;
 	}
@@ -322,11 +377,12 @@ class PlayerStats extends React.Component {
 		let hero = this.props.hero;
 		return (<div id="stats">
 					<p>Dupre the Fighter</p>
-					<p>Level {hero.lvl}</p>
+					<p>Level {hero.xpLevel}<br/>
+					EXP {hero.xp}/{xpTable[hero.xpLevel]}</p>
 					<p>HP {hero.hp}/{hero.maxhp}</p>
-					<p>EXP {hero.xp}/{xpTable[hero.lvl]}</p>
 					<p>Strength {hero.str}</p>
 					<p>Dexterity {hero.dex}</p>
+					<p>Weapon: {hero.weapon}</p>
 				</div>)
 	}
 }
@@ -353,7 +409,7 @@ class Container extends React.Component {
 				let viewrow = [];
 				for(let i = hero.x - SightRadius; i < hero.x + SightRadius; i++) {
 					let key = j*(2*SightRadius + 1) + i;
-					if (inLOS({y: hero.y, x: hero.x}, {y: j, x: i}, dungeon)) {
+					if (inLOS({y: hero.y, x: hero.x}, {y: j, x: i}, this.props.state)) {
 						let actor = actors.find( actor => actor.y == j && actor.x == i )
 						if (actor)
 							viewrow.push(<Tile key={key} tile={actor.type} />);
@@ -367,7 +423,7 @@ class Container extends React.Component {
 			}
 					
 			return (<div>
-						<h1>Dungeon level {hero.lvl}</h1>
+						<h1>Dungeon Level {hero.dungeonLevel}</h1>
 						<div id="viewport">
 							{viewport}
 							<MessageBox message={message} />
